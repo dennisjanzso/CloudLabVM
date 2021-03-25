@@ -1,0 +1,122 @@
+
+---
+- name: Build manager VMs for Cloud Computing
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - vault.yml
+
+  vars:
+    ssh_public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDG5IYqrZ3+dPF2YpuE0VW2sJ07del80SZ8rc4q5Fn8olVwzSjeQ3B5wq9mkL8sGsRf3BTfG1JCv7AO6XLNk/K3Mj6rABRXD6stjtzVyjRdAoXiX+i9kdCwUZFl5hBPM+h+yADWNX40vbM1zvW17lCZs4Oi1rYhU+QtGk5PnIR1zJIcUNbd0pt6U+ddfJh9yDVl2Rz+6Ge8k4vhn72o3SHYHujAY09FiHPq0W0p20gKC9fj9TU13b7hUjCowwbM4k7YeWhj6Jg30Tqy9qmca4KNCoWVsn27wnDUKbCmYP+VNeS2ZXlYchwOJtvOxuuFXgEOoihEZkGk0mA4u8ietZkT
+    ssh_my_public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC+R1ZHgxEMY0tcTmkU0XKFKsEdA5bVrvhb0fhEo/IHhOPjtjQKaDTSmX40ICP79IotL8Zb/CMamZpFQaxeY8KvZM8OgNG6w9b+dwqohbqz+sYZkbBU+p/RCD5s/VLsoZmPbDmmzZg05Hq08g6HIP2o8UWKOD1nIoYcqPgfw6Dk1z1kkpLq0nGsxXoHIZcw36dUGj3RTOrf5CwI4wgEOtLfLWXx3lviwnQlP0Q34MbtyMqiz9tgJ4/hqS7o58LJdYnDb5szANNyFWS/EDrTBc8bx6ZYqZSPsB7umSkLnD1Yed4qBrfsRioV4oBr8Aj5/EHWYhkG6SdEOBokdTddYzzaFWmVwrfMQVbPu9eI/8eIAkVBuqlEf5TMERzcYVAt3iXMNL1HHiqbZU+9n0o//ylEsPDbP1Fg6yyBPUteo7LyLoGt6cF1WQJys4P4ZWFPEjJAvzR0JNsrNY/+QY9pKM53FPMfv8SBzqyn4kiTQn2iCKGL8l+U485UtT2SOks1ymySTOpVM8VPfpcUnpRphnwaC63Ck8LRvy+aVpm+2cd/6POhI7pkEfHYQX/6/FepB4IJT9SeJlJJ5QbkmQlR1b3WYTlAZIkyTIw3uaNzKK0gsdhmxjxscViuYBFanghCKA3FUAxeNjDusBk7G3d11DdLDI3gI5djrgbg5ej7Plxg0Q==
+
+    ovirt_login: alu0101456874@ULL
+
+    prefix: CN-21
+    nodes:
+      - name: Node_1
+        ip: 192.168.50.51
+
+    node_nics: 
+      - name: nic1
+        profile_name: DOC1
+      - name: nic2
+        profile_name: DOCP2P-4005
+
+# Tasks
+# ------
+
+  tasks:
+    - name: Login to IaaS
+      ovirt_auth:
+        url: https://iaas.ull.es/ovirt-engine/api
+        insecure: yes
+        username: "{{ ovirt_login }}"
+        password: "{{ ovirt_password }}"
+        headers:
+          filter: true
+
+    - name: Create a VM
+      ovirt_vm:
+        auth: "{{ ovirt_auth }}"
+        cluster: Cluster-Rojo
+        name: "{{ prefix }}-{{ item.name }}"
+        cpu_cores: 1
+        cpu_sockets: 1
+        memory: 1GiB
+        template: debian-10-sinred-cloudinit
+        nics: "{{ node_nics }}"
+        state: present
+        wait: yes
+      with_items: "{{ nodes }}"
+    
+    - name: Update VM via cloud-init
+      ovirt_vm:
+        auth: "{{ ovirt_auth }}"
+        name: "{{ prefix }}-{{ item.name }}"
+        state: running
+        cloud_init_nics:
+          - nic_name: ens3
+            nic_boot_protocol: dhcp
+            nic_on_boot: yes
+            nic_on_boot: True
+          - nic_name: ens4
+            nic_boot_protocol: static
+            nic_ip_address: "{{ item.ip }}"
+            nic_netmask: 255.255.255.0
+            nic_gateway: 192.168.50.1
+            nic_on_boot: yes
+            nic_on_boot: True
+          
+        cloud_init:
+          host_name: "{{ item.name }}"
+          user_name: ansible
+
+          root_password: $5$r0zM0cPhUX69AFY7$BecZxeRfstuuNp7iq8oQxGCFIDntUllE4w9mSB09MF.
+      
+          custom_script: |
+            write_files:
+              - path: /etc/sudoers.d/ansible
+                permissions: '0644'
+                content: |
+                  ansible ALL=(ALL) NOPASSWD:ALL
+              - path: /tmp/saludos.txt
+                permissions: '0644'
+                content: |
+                  "Que pasa, Oveja"
+            runcmd:
+              - sed -i '/AllowUsers/c\AllowUsers adminstic usuario soporteiass ansible' /etc/ssh/sshd_config
+              - systemctl restart sshd
+              - apt update
+              - sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen
+              - locale-gen
+              - echo LANG=en_US.UTF-8 > /etc/default/locale
+              - mkdir /home/ansible/.ssh
+              - touch /home/ansible/.ssh/authorized_keys
+              - touch /home/ansible/.ssh/id_rsa.pub
+              - touch /home/ansible/.ssh/id_rsa
+              - echo {{ ssh_public_key }} ansible@Node_1 >> /home/ansible/.ssh/authorized_keys
+              - echo {{ ssh_my_public_key }} ansible@Node_1 >> /home/ansible/.ssh/authorized_keys
+              - echo {{ ssh_public_key }} ansible@{{ item.name }} >> /home/ansible/.ssh/id_rsa.pub
+              - echo "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcnNhAAAAAwEAAQAAAQEAxuSGKq2d/nTxdmKbhNFVtrCdO3XpfNEmfK3OKuRZ/KJVcM0o3kNwecKvZpC/LBrEX9wU3xtSQr+wDulyzZPytzI+qwAUVw+rLY7c1co0XQKF4l/ovZHQsFGRZeYQTzPofsgA1jV+NL2zNc71te5QmbODota2IVPkLRpOT5yEdcySHFDW3dKbelPnXXyYfcg1Zdkc/uhnvJOL4Z+9qN0h2B7owGNPRYhz6tFtKdtICgvX4/U1Nd2+4VIwqMMGzOJO2HloY+iYN9E6svapnGuCjQqFlbJ9u8Jw1CmwpmD/lTXktmV5WHIcDibbzsbrhV4BDqIoRGZBpNJgOLvInrWZEwAAA8hW+k/vVvpP7wAAAAdzc2gtcnNhAAABAQDG5IYqrZ3+dPF2YpuE0VW2sJ07del80SZ8rc4q5Fn8olVwzSjeQ3B5wq9mkL8sGsRf3BTfG1JCv7AO6XLNk/K3Mj6rABRXD6stjtzVyjRdAoXiX+i9kdCwUZFl5hBPM+h+yADWNX40vbM1zvW17lCZs4Oi1rYhU+QtGk5PnIR1zJIcUNbd0pt6U+ddfJh9yDVl2Rz+6Ge8k4vhn72o3SHYHujAY09FiHPq0W0p20gKC9fj9TU13b7hUjCowwbM4k7YeWhj6Jg30Tqy9qmca4KNCoWVsn27wnDUKbCmYP+VNeS2ZXlYchwOJtvOxuuFXgEOoihEZkGk0mA4u8ietZkTAAAAAwEAAQAAAQAa2JG7hP/EbuiAwEKZpN/a7u/qLLo9XMXDInqnk3cKAKdjuG2BwryV0s92GqeTPnGvNreifb+WvuT2vk/+q6+hRqjqz/Hu5nCGj7gDK23x9/s2WRfDLsFqazgi9vDQoAMLyddDEqlcWRatdqf3zJkYhgCIpE6lJPuxktFrMYc3lw5cMgP/3NNhvZIpYQ/vWt6PhfCEgNEhf5MjZ3pdyhmNZgdw9D04zmR6YesfQB2pSoIoDIw1sFYsrrXp7+2x3/f0fL4SRnL71C01UVYd4CAXURCwbRBUQvIYW43CYIfkL3zBOW6Wk829Zjrod7OiULmACpD41ZqOMOXYjHyPbs7BAAAAgGLB6MGxMh01+sAq25SmEmAx6D7akRGmuuIPG0gJqlC143Xr0iJsvt5IYg9D2lkzV4av7lWZP/5yenGrIyDverfctou5QN0uGdGB6M1KJxmI1Oa1baJbHHx7in+pCpK/FwIumIkXbBd9siy5twPeS61lm5+wjBX+vsQRslgusdlVAAAAgQDmSvMbf1fDa8Kw6PEhzetaleMB4nLpWaVY/CguR+gNu68rw5JvIHQnsvEW3y7ll3d5YUsTnCLYyO6jfJY04ieuUeecrqY+diS4+t5wYFfcC58P0n6gyUeFqzj8ouW5DMZ7io4J68qnpjCNGCVCChCVdp7rzBpq1IBbLMhVTUMt0QAAAIEA3RhB4ud0ydwvSKjj3XftlZPPcP2+jESycvC8U8jHfR5bza+sDyuhfGjF17vZcjU4/mopSNX3cclM2HRpuDlljKjt+zKNf9VC56i9qKzRjaI0L2VjL7vrxdkTt30FBTlyrseIB8MsGtUB7qvn+37/Dp4Wid8wXTchOfbfkNbC3aMAAAARYW5zaWJsZUBDQ01hbmFnZXIBAg==\n-----END OPENSSH PRIVATE KEY-----" >> /home/ansible/.ssh/id_rsa
+              - apt install gcc mpi mpich -y
+              - echo "192.168.50.51    Node_1\n192.168.50.52    Node_2\n192.168.50.53    Node_3\n192.168.50.54    Node_4\n192.168.50.55    Node_5\n192.168.50.56    Node_6\n192.168.50.57    Node_7\n192.168.50.58    Node_8\n" >> /etc/hosts
+              - apt-get install nfs-kernel-server -y
+              - mkdir /home/ansible/cloud
+              - chmod a+rwx /home/ansible/cloud
+              - echo "/home/ansible/cloud *(rw,sync,no_root_squash,no_subtree_check)" >> /etc/exports
+              - exportfs -a
+              - service nfs-kernel-server restart
+              - touch /home/ansible/cloud/machines
+              - echo "192.168.50.51:1\n192.168.50.52:1\n192.168.50.53:1\n192.168.50.54:1\n192.168.50.55:1\n192.168.50.56:1\n192.168.50.57:1\n192.168.50.58:1\n" >> /home/ansible/cloud/machines
+              - touch /home/ansible/cloud/build_and_run
+              - chmod +x /home/ansible/cloud/build_and_run
+              - reboot
+        wait: yes
+      with_items: "{{ nodes }}"
+
+    - name: Cleanup IaaS auth token
+      ovirt_auth:
+        ovirt_auth: "{{ ovirt_auth }}"
+        state: absent

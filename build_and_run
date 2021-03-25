@@ -1,0 +1,13 @@
+#!/bin/bash
+if [ -z $1 ]
+then
+    echo "Error: Expected name of binary (arg 1) and name of file (arg 2) as arguments"
+    exit
+fi
+if [ -z $2 ]
+    then
+    echo "Error: Expected name of binary (arg 1) and name of file (arg 2) as arguments"
+exit
+fi
+mpicc -o ~/cloud/$1 ~/cloud/$2
+mpirun -n 8 -f ~/cloud/machines ~/cloud/./$1
